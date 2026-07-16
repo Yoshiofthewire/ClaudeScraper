@@ -11,7 +11,8 @@
     "node": ">=22"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "start": "node bin/claude-usage-server.js"
   },
   "dependencies": {
     "@xterm/headless": "^5.5.0",
