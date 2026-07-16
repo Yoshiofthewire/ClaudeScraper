@@ -48,7 +48,8 @@ async function withServer(opts, fn) {
 }
 
 const FAST_SCRAPE_OPTIONS = { readyQuietMs: 20, readyTimeoutMs: 500, stableQuietMs: 20, stableTimeoutMs: 500 };
-const FAST_LOGIN_OPTIONS = { readyQuietMs: 20, readyTimeoutMs: 500, urlQuietMs: 20, urlTimeoutMs: 500, resultQuietMs: 20, resultTimeoutMs: 500 };
+const FAST_LOGIN_OPTIONS = { readyQuietMs: 20, readyTimeoutMs: 500, methodMenuQuietMs: 20, methodMenuTimeoutMs: 500, urlQuietMs: 20, urlTimeoutMs: 500, resultQuietMs: 20, resultTimeoutMs: 500 };
+const METHOD_MENU_SCREEN = '  Select login method:\r\n\r\n  ❯ 1. Claude account with subscription\r\n';
 
 test('GET /api/usage returns 503 before authentication', async () => {
   const configDir = makeTmpConfigDir();
@@ -130,6 +131,8 @@ test('login flow: start returns a URL, submitting a valid code authenticates', a
       await waitUntil(() => sessions.length >= 1);
       sessions[0].emit('❯ ready\r\n');
       await waitUntil(() => sessions[0].writes.includes('/login\r'));
+      sessions[0].emit(METHOD_MENU_SCREEN);
+      await waitUntil(() => sessions[0].writes.filter((w) => w === '\r').length === 1);
       sessions[0].emit('Visit https://example.com/device to authorize\r\n');
 
       const startRes = await startPromise;
@@ -186,6 +189,8 @@ test('concurrent POST /api/login/start calls share one in-flight session', async
 
       sessions[0].emit('❯ ready\r\n');
       await waitUntil(() => sessions[0].writes.includes('/login\r'));
+      sessions[0].emit(METHOD_MENU_SCREEN);
+      await waitUntil(() => sessions[0].writes.filter((w) => w === '\r').length === 1);
       sessions[0].emit('Visit https://example.com/device to authorize\r\n');
 
       const [res1, res2] = await Promise.all([p1, p2]);

@@ -3,10 +3,15 @@ import { pollUntil } from './pollUntil.js';
 
 export const URL_RE = /(https:\/\/\S+)/;
 export const SUCCESS_RE = /(login successful|logged in|authentication successful)/i;
+export const METHOD_MENU_RE = /select login method/i;
 const ERROR_RE = /(invalid code|expired|login failed|try again)/i;
 
 function hasUrl(text) {
   return URL_RE.test(text);
+}
+
+function hasLoginMethodMenu(text) {
+  return METHOD_MENU_RE.test(text);
 }
 
 function hasOutcome(text) {
@@ -21,6 +26,8 @@ function extractErrorLine(text) {
 export async function startLogin(session, {
   readyQuietMs = 800,
   readyTimeoutMs = 15000,
+  methodMenuQuietMs = 500,
+  methodMenuTimeoutMs = 10000,
   urlQuietMs = 500,
   urlTimeoutMs = 20000,
 } = {}) {
@@ -30,6 +37,13 @@ export async function startLogin(session, {
   await pollUntil(term, () => true, { quietMs: readyQuietMs, timeoutMs: readyTimeoutMs });
 
   session.write('/login\r');
+
+  // Real Claude Code shows an intermediate "Select login method" menu with
+  // option 1 ("Claude account with subscription") pre-selected. Confirm it
+  // with Enter before the OAuth URL screen appears.
+  await pollUntil(term, hasLoginMethodMenu, { quietMs: methodMenuQuietMs, timeoutMs: methodMenuTimeoutMs });
+
+  session.write('\r');
 
   await pollUntil(term, hasUrl, { quietMs: urlQuietMs, timeoutMs: urlTimeoutMs });
 
