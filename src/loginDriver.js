@@ -6,6 +6,19 @@ export const SUCCESS_RE = /(login successful|logged in|authentication successful
 export const METHOD_MENU_RE = /select login method/i;
 const ERROR_RE = /(invalid code|expired|login failed|try again)/i;
 
+// Real Claude Code renders the OAuth URL as an OSC 8 terminal hyperlink
+// (`ESC ] 8 ; params ; URI BEL`) and, independently, prints a *visible*
+// label for it that it manually word-wraps to the terminal width itself
+// (inserting real \r\n between segments and re-opening the hyperlink span
+// on each line) rather than relying on the terminal's own auto-wrap. That
+// means the visible label is genuinely split across hard line breaks, not
+// terminal soft-wraps, so even TerminalBuffer#getUnwrappedText() (which
+// only reconstructs xterm's own soft-wraps) can't recover it from the
+// rendered screen alone. The hyperlink's URI parameter, however, always
+// carries the complete, untruncated URL, so it's the reliable source of
+// truth when present.
+const OSC8_URL_RE = /\x1b\]8;[^;\x07]*;(https:\/\/[^\x07\x1b]*)\x07/;
+
 function hasUrl(text) {
   return URL_RE.test(text);
 }
@@ -32,7 +45,11 @@ export async function startLogin(session, {
   urlTimeoutMs = 20000,
 } = {}) {
   const term = new TerminalBuffer({ cols: 120, rows: 40 });
-  session.onData((chunk) => term.write(chunk));
+  let rawOutput = '';
+  session.onData((chunk) => {
+    rawOutput += chunk;
+    term.write(chunk);
+  });
 
   await pollUntil(term, () => true, { quietMs: readyQuietMs, timeoutMs: readyTimeoutMs });
 
@@ -47,7 +64,15 @@ export async function startLogin(session, {
 
   await pollUntil(term, hasUrl, { quietMs: urlQuietMs, timeoutMs: urlTimeoutMs });
 
-  const match = term.getText().match(URL_RE);
+  // Prefer the OSC 8 hyperlink target, which is never wrapped or truncated
+  // (see OSC8_URL_RE above). Fall back to the rendered screen text for
+  // terminals/output that don't carry a hyperlink escape sequence at all.
+  const hyperlinkMatch = rawOutput.match(OSC8_URL_RE);
+  if (hyperlinkMatch) {
+    return { term, loginUrl: hyperlinkMatch[1] };
+  }
+
+  const match = term.getUnwrappedText().match(URL_RE);
   return { term, loginUrl: match[1] };
 }
 

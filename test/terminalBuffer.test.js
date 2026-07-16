@@ -8,6 +8,22 @@ test('getText() returns written plain text', async () => {
   assert.ok(buf.getText().includes('hello world'));
 });
 
+test('getUnwrappedText() reconstructs a single long line that the terminal soft-wrapped, while getText() still shows it split', async () => {
+  const buf = new TerminalBuffer({ cols: 20, rows: 10 });
+  // No spaces, so this is genuinely one continuous run of text that exceeds
+  // the 20-column width and forces the terminal's own line-wrapping (as
+  // opposed to a real line break, which would use \r\n).
+  const longLine = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJ1234567890';
+  await buf.write(longLine);
+
+  const wrapped = buf.getText();
+  assert.ok(wrapped.includes('\n'), 'expected getText() to split the wrapped line across rows');
+  assert.ok(!wrapped.includes(longLine), 'expected getText() to NOT contain the unbroken original string');
+
+  const unwrapped = buf.getUnwrappedText();
+  assert.ok(unwrapped.includes(longLine), 'expected getUnwrappedText() to reconstruct the original unbroken string');
+});
+
 test('waitQuiet() resolves only after the quiet period has elapsed since the last write', async () => {
   const buf = new TerminalBuffer({ cols: 40, rows: 5 });
   await buf.write('a');

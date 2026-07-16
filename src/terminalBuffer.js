@@ -50,4 +50,26 @@ export class TerminalBuffer {
     }
     return lines.join('\n');
   }
+
+  // Like getText(), but reconstructs logical lines instead of screen rows:
+  // rows the terminal soft-wrapped (line.isWrapped) are concatenated onto the
+  // end of the previous logical line with nothing inserted at the join,
+  // since terminal wrapping splits a single logical line character-for-
+  // character. This is needed to recover long content (e.g. OAuth URLs) that
+  // getText() would otherwise silently split across multiple '\n'-joined
+  // rows.
+  getUnwrappedText() {
+    const buffer = this.#terminal.buffer.active;
+    const lines = [];
+    for (let i = 0; i < buffer.length; i++) {
+      const line = buffer.getLine(i);
+      const text = line ? line.translateToString(true) : '';
+      if (line && line.isWrapped && lines.length > 0) {
+        lines[lines.length - 1] += text;
+      } else {
+        lines.push(text);
+      }
+    }
+    return lines.join('\n');
+  }
 }
