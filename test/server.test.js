@@ -157,6 +157,63 @@ test('login flow: start returns a URL, submitting a valid code authenticates', a
   );
 });
 
+test('concurrent POST /api/login/start calls share one in-flight session', async () => {
+  const configDir = makeTmpConfigDir();
+  const sessions = [];
+  await withServer(
+    {
+      configDir,
+      workDir: '/tmp',
+      intervalMs: 60000,
+      scrapeOptions: FAST_SCRAPE_OPTIONS,
+      loginOptions: FAST_LOGIN_OPTIONS,
+      spawnSession: () => {
+        const s = new ScriptedSession();
+        sessions.push(s);
+        return s;
+      },
+    },
+    async (base) => {
+      const p1 = fetch(`${base}/api/login/start`, { method: 'POST' });
+      const p2 = fetch(`${base}/api/login/start`, { method: 'POST' });
+
+      await waitUntil(() => sessions.length >= 1);
+      // Give the second request a chance to be processed before we let the
+      // first attempt resolve. If handleLoginStart weren't serialized, this
+      // window is exactly where a second pty would get spawned.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(sessions.length, 1, 'a second concurrent call must not spawn its own pty');
+
+      sessions[0].emit('❯ ready\r\n');
+      await waitUntil(() => sessions[0].writes.includes('/login\r'));
+      sessions[0].emit('Visit https://example.com/device to authorize\r\n');
+
+      const [res1, res2] = await Promise.all([p1, p2]);
+      const [body1, body2] = await Promise.all([res1.json(), res2.json()]);
+
+      assert.equal(sessions.length, 1, 'only one pty session should ever have been spawned');
+      assert.equal(body1.status, 'awaiting-code');
+      assert.equal(body2.status, 'awaiting-code');
+      assert.equal(body1.loginUrl, 'https://example.com/device');
+      assert.equal(body2.loginUrl, 'https://example.com/device');
+
+      // Clean up the in-progress login so its idle timer doesn't keep the
+      // process (and this test run) alive after the assertions are done.
+      fs.writeFileSync(path.join(configDir, '.credentials.json'), '{}');
+      const codePromise = fetch(`${base}/api/login/code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: '123456' }),
+      });
+      await waitUntil(() => sessions[0].writes.includes('123456\r'));
+      sessions[0].emit('Login successful\r\n');
+      const codeRes = await codePromise;
+      const codeBody = await codeRes.json();
+      assert.equal(codeBody.status, 'success');
+    },
+  );
+});
+
 test('POST /api/login/code without a code returns 400', async () => {
   const configDir = makeTmpConfigDir();
   await withServer(

@@ -24,6 +24,7 @@ export function createServer({
 
   let authenticated = hasCredentials(configDir);
   let pendingLogin = null;
+  let loginStartInFlight = null;
 
   const cache = createUsageCache({
     intervalMs,
@@ -51,7 +52,13 @@ export function createServer({
     }, LOGIN_IDLE_TIMEOUT_MS);
   }
 
-  async function handleLoginStart() {
+  // Concurrent POST /api/login/start calls must share a single in-flight
+  // attempt rather than each spawning their own pty (see usageCache.js's
+  // refresh() for the same inFlight-promise dedup pattern). Without this,
+  // two overlapping calls could each spawn a session, and whichever
+  // resolves first would have its `pendingLogin` assignment silently
+  // overwritten by the second — leaking a pty and orphaning its idle timer.
+  async function doLoginStart() {
     if (pendingLogin?.session) {
       await pendingLogin.session.close({ exitCommand: '/exit\r' }).catch(() => {});
     }
@@ -68,17 +75,37 @@ export function createServer({
     }
   }
 
-  async function handleLoginCode(code) {
-    if (!pendingLogin?.session || pendingLogin.status !== 'awaiting-code') {
-      return { status: pendingLogin?.status ?? 'idle', error: pendingLogin?.error ?? null };
-    }
-    if (pendingLogin.idleTimer) clearTimeout(pendingLogin.idleTimer);
-    pendingLogin.status = 'submitting';
+  async function handleLoginStart() {
+    if (loginStartInFlight) return loginStartInFlight;
+    loginStartInFlight = doLoginStart().finally(() => {
+      loginStartInFlight = null;
+    });
+    return loginStartInFlight;
+  }
 
-    const result = await submitLoginCode(pendingLogin.session, pendingLogin.term, code, loginOptions);
+  async function handleLoginCode(code) {
+    // Capture the specific pending-login record we're operating on. A
+    // concurrent /api/login/start can supersede `pendingLogin` while we're
+    // awaiting submitLoginCode below, so every reference after that await
+    // must go through `current`, not the mutable module-level variable.
+    const current = pendingLogin;
+    if (!current?.session || current.status !== 'awaiting-code') {
+      return { status: current?.status ?? 'idle', error: current?.error ?? null };
+    }
+    if (current.idleTimer) clearTimeout(current.idleTimer);
+    current.status = 'submitting';
+
+    const result = await submitLoginCode(current.session, current.term, code, loginOptions);
+
+    if (pendingLogin !== current) {
+      // A newer login attempt has already superseded this one and, as part
+      // of superseding it, already closed `current.session`. Don't close
+      // anything again and don't mutate the (now newer) pendingLogin.
+      return loginState();
+    }
 
     if (result.success) {
-      await pendingLogin.session.close({ exitCommand: '/exit\r' }).catch(() => {});
+      await current.session.close({ exitCommand: '/exit\r' }).catch(() => {});
       clearPendingLogin();
       authenticated = hasCredentials(configDir);
       if (authenticated) cache.start();
@@ -87,10 +114,10 @@ export function createServer({
         : { status: 'error', error: 'Login reported success but no credentials were written' };
     }
 
-    pendingLogin.status = 'awaiting-code';
-    pendingLogin.error = result.message;
-    pendingLogin.idleTimer = armIdleTimer();
-    return { status: 'awaiting-code', error: result.message, loginUrl: pendingLogin.loginUrl };
+    current.status = 'awaiting-code';
+    current.error = result.message;
+    current.idleTimer = armIdleTimer();
+    return { status: 'awaiting-code', error: result.message, loginUrl: current.loginUrl };
   }
 
   function loginState() {
