@@ -14,4 +14,8 @@ if [ "$(id -u)" = "0" ]; then
   exec gosu node "$0" "$@"
 fi
 
+if [ "$#" -gt 0 ]; then
+  exec "$@"
+fi
+
 exec node /app/bin/claude-usage-server.js

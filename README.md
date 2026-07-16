@@ -264,12 +264,17 @@ npm start   # runs the web server locally; needs CLAUDE_CONFIG_DIR set
 ```
 
 `test/fixtures/usage-subscription.txt`, `test/fixtures/login-url-screen.txt`,
-and `test/fixtures/login-success-screen.txt` are real captured screens
-(hand-captured, PII redacted) used to test the parsers/drivers without
+`test/fixtures/login-success-screen.txt`, `test/fixtures/login-method-menu-screen.txt`,
+`test/fixtures/login-invalid-code-screen.txt`, and `test/fixtures/login-url-wrapped-screen.txt`
+are real captured screens (hand-captured, PII redacted) used to test the parsers/drivers without
 needing a live login. If a future Claude Code release changes either
 screen's rendered text, capture a fresh one the same way and update the
 relevant fixture/regex.
 
 Bumping the pinned `@anthropic-ai/claude-code` version in the Dockerfile:
 update the version in both the `npm install -g` line and re-verify the
-fixtures/parsers still match the new release's rendered output.
+fixtures/parsers still match the new release's rendered output. Also re-run a
+full manual login walkthrough (start the container fresh and complete a real
+browser OAuth round-trip) after a version bump, since the fixtures are static
+snapshots that can't catch interaction-protocol changes (e.g. new intermediate
+screens, different paste-handling requirements) the way a live re-run would.
