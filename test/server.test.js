@@ -147,7 +147,7 @@ test('login flow: start returns a URL, submitting a valid code authenticates', a
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: '123456' }),
       });
-      await waitUntil(() => sessions[0].writes.includes('123456\r'));
+      await waitUntil(() => sessions[0].writes.includes('\x1b[200~123456\x1b[201~'));
       sessions[0].emit('Login successful\r\n');
 
       const codeRes = await codePromise;
@@ -210,7 +210,7 @@ test('concurrent POST /api/login/start calls share one in-flight session', async
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: '123456' }),
       });
-      await waitUntil(() => sessions[0].writes.includes('123456\r'));
+      await waitUntil(() => sessions[0].writes.includes('\x1b[200~123456\x1b[201~'));
       sessions[0].emit('Login successful\r\n');
       const codeRes = await codePromise;
       const codeBody = await codeRes.json();
@@ -260,7 +260,7 @@ test('login flow: a rejected submitLoginCode recovers to awaiting-code instead o
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: '111111' }),
       });
-      await waitUntil(() => sessions[0].writes.includes('111111\r'));
+      await waitUntil(() => sessions[0].writes.includes('\x1b[200~111111\x1b[201~'));
 
       assert.equal(codeRes.status, 200, 'a rejected submitLoginCode must not surface as a 500');
       const codeBody = await codeRes.json();
@@ -280,7 +280,7 @@ test('login flow: a rejected submitLoginCode recovers to awaiting-code instead o
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ code: '222222' }),
       });
-      await waitUntil(() => sessions[0].writes.includes('222222\r'));
+      await waitUntil(() => sessions[0].writes.includes('\x1b[200~222222\x1b[201~'));
       sessions[0].emit('Login successful\r\n');
       const retryRes = await retryPromise;
       const retryBody = await retryRes.json();

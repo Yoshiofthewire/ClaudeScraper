@@ -4,7 +4,7 @@ import { pollUntil } from './pollUntil.js';
 export const URL_RE = /(https:\/\/\S+)/;
 export const SUCCESS_RE = /(login successful|logged in|authentication successful)/i;
 export const METHOD_MENU_RE = /select login method/i;
-const ERROR_RE = /(invalid code|expired|login failed|try again)/i;
+export const ERROR_RE = /(invalid code|expired|login failed|try again)/i;
 
 // Real Claude Code renders the OAuth URL as an OSC 8 terminal hyperlink
 // (`ESC ] 8 ; params ; URI BEL`) and, independently, prints a *visible*
@@ -80,7 +80,16 @@ export async function submitLoginCode(session, term, code, {
   resultQuietMs = 500,
   resultTimeoutMs = 15000,
 } = {}) {
-  session.write(`${code}\r`);
+  // Real Claude Code's code-entry field silently drops raw pty writes above
+  // some length threshold (confirmed live: works for short codes, hangs
+  // forever for the ~90-character codes Claude Code actually issues).
+  // Wrapping the code in bracketed-paste markers (`ESC[200~...ESC[201~`)
+  // tells the TUI this arrived as a paste rather than keystrokes, which it
+  // requires to accept longer content. The trailing Enter is sent as a
+  // separate write; two immediate consecutive writes resolved correctly in
+  // live testing, so no artificial delay is added here.
+  session.write(`\x1b[200~${code}\x1b[201~`);
+  session.write('\r');
 
   await pollUntil(term, hasOutcome, { quietMs: resultQuietMs, timeoutMs: resultTimeoutMs });
 

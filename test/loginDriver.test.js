@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startLogin, submitLoginCode, URL_RE, SUCCESS_RE, METHOD_MENU_RE } from '../src/loginDriver.js';
+import { startLogin, submitLoginCode, URL_RE, SUCCESS_RE, METHOD_MENU_RE, ERROR_RE } from '../src/loginDriver.js';
 import { TerminalBuffer } from '../src/terminalBuffer.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -122,7 +122,7 @@ test('submitLoginCode: full flow from URL to a successful code', async () => {
   const codePromise = submitLoginCode(session, term, '123456', {
     resultQuietMs: 20, resultTimeoutMs: 500,
   });
-  await waitUntil(() => session.writes.includes('123456\r'));
+  await waitUntil(() => session.writes.includes('\x1b[200~123456\x1b[201~'));
   session.emit('Login successful! You are now authenticated.\r\n');
 
   const result = await codePromise;
@@ -146,12 +146,46 @@ test('submitLoginCode: full flow from URL to a rejected code', async () => {
   const codePromise = submitLoginCode(session, term, 'wrong', {
     resultQuietMs: 20, resultTimeoutMs: 500,
   });
-  await waitUntil(() => session.writes.includes('wrong\r'));
+  await waitUntil(() => session.writes.includes('\x1b[200~wrong\x1b[201~'));
   session.emit('That code is invalid, please try again.\r\n');
 
   const result = await codePromise;
   assert.equal(result.success, false);
   assert.match(result.message, /invalid/i);
+});
+
+test('submitLoginCode wraps the code in bracketed-paste markers before sending Enter', async () => {
+  // Regression guard for the Task 9 bug: real Claude Code silently drops raw
+  // (unwrapped) pty writes above some length threshold, so ~90-character
+  // real login codes never submit. Wrapping the code in bracketed-paste
+  // markers (ESC[200~...ESC[201~) fixed it against the real binary. This
+  // can't simulate Claude Code's real acceptance behavior with a
+  // ScriptedSession, but it does guard against someone reverting back to a
+  // raw `${code}\r` write.
+  const session = new ScriptedSession();
+  const term = new TerminalBuffer({ cols: 120, rows: 40 });
+  session.onData((chunk) => term.write(chunk));
+  const longCode = 'a'.repeat(92);
+
+  const codePromise = submitLoginCode(session, term, longCode, {
+    resultQuietMs: 20, resultTimeoutMs: 500,
+  });
+  await waitUntil(() => session.writes.length > 0);
+  session.emit('Login successful! You are now authenticated.\r\n');
+  await codePromise;
+
+  assert.ok(
+    session.writes.includes(`\x1b[200~${longCode}\x1b[201~`),
+    `expected a bracketed-paste-wrapped write for the code, got writes: ${JSON.stringify(session.writes)}`,
+  );
+  const pasteIndex = session.writes.indexOf(`\x1b[200~${longCode}\x1b[201~`);
+  const enterIndex = session.writes.indexOf('\r', pasteIndex);
+  assert.ok(enterIndex > pasteIndex, 'expected the trailing Enter to be written after the bracketed-paste code');
+});
+
+test('submitLoginCode recognizes the real captured "Invalid code" error fixture', () => {
+  const text = fs.readFileSync(path.join(__dirname, 'fixtures/login-invalid-code-screen.txt'), 'utf8');
+  assert.match(text, ERROR_RE);
 });
 
 test('startLogin extracts the URL from the real captured fixture', () => {
