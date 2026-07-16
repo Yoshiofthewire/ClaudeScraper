@@ -267,8 +267,8 @@ npm start   # runs the web server locally; needs CLAUDE_CONFIG_DIR set
 `test/fixtures/login-success-screen.txt`, `test/fixtures/login-method-menu-screen.txt`,
 `test/fixtures/login-invalid-code-screen.txt`, and `test/fixtures/login-url-wrapped-screen.txt`
 are real captured screens (hand-captured, PII redacted) used to test the parsers/drivers without
-needing a live login. If a future Claude Code release changes either
-screen's rendered text, capture a fresh one the same way and update the
+needing a live login. If a future Claude Code release changes any of these
+screens' rendered text, capture a fresh one the same way and update the
 relevant fixture/regex.
 
 Bumping the pinned `@anthropic-ai/claude-code` version in the Dockerfile:
