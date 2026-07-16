@@ -95,7 +95,27 @@ export function createServer({
     if (current.idleTimer) clearTimeout(current.idleTimer);
     current.status = 'submitting';
 
-    const result = await submitLoginCode(current.session, current.term, code, loginOptions);
+    let result;
+    try {
+      result = await submitLoginCode(current.session, current.term, code, loginOptions);
+    } catch (err) {
+      if (pendingLogin !== current) {
+        // A newer login attempt has already superseded this one; don't
+        // mutate the (now newer) pendingLogin.
+        return loginState();
+      }
+      // submitLoginCode rejected (e.g. it timed out waiting for a
+      // recognized success/error pattern on screen) rather than resolving
+      // with a success/failure outcome. The pty session and its terminal
+      // are still alive and valid — this was a transient failure to detect
+      // an outcome, not proof the code was wrong — so recover back to
+      // awaiting-code and let the user retry instead of getting stuck on
+      // 'submitting' forever.
+      current.status = 'awaiting-code';
+      current.error = `Failed to detect login result: ${err.message}`;
+      current.idleTimer = armIdleTimer();
+      return { status: 'awaiting-code', error: current.error, loginUrl: current.loginUrl };
+    }
 
     if (pendingLogin !== current) {
       // A newer login attempt has already superseded this one and, as part

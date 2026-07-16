@@ -219,6 +219,76 @@ test('concurrent POST /api/login/start calls share one in-flight session', async
   );
 });
 
+test('login flow: a rejected submitLoginCode recovers to awaiting-code instead of getting stuck', async () => {
+  const configDir = makeTmpConfigDir();
+  const sessions = [];
+  // Deliberately give submitLoginCode a very short timeout so the poll
+  // genuinely times out (and rejects) when no recognized success/error
+  // pattern is ever emitted after the code is written, exercising the real
+  // rejection path instead of mocking it.
+  const TIMEOUT_LOGIN_OPTIONS = { ...FAST_LOGIN_OPTIONS, resultQuietMs: 20, resultTimeoutMs: 100 };
+  await withServer(
+    {
+      configDir,
+      workDir: '/tmp',
+      intervalMs: 60000,
+      scrapeOptions: FAST_SCRAPE_OPTIONS,
+      loginOptions: TIMEOUT_LOGIN_OPTIONS,
+      spawnSession: () => {
+        const s = new ScriptedSession();
+        sessions.push(s);
+        return s;
+      },
+    },
+    async (base) => {
+      const startPromise = fetch(`${base}/api/login/start`, { method: 'POST' });
+      await waitUntil(() => sessions.length >= 1);
+      sessions[0].emit('❯ ready\r\n');
+      await waitUntil(() => sessions[0].writes.includes('/login\r'));
+      sessions[0].emit(METHOD_MENU_SCREEN);
+      await waitUntil(() => sessions[0].writes.filter((w) => w === '\r').length === 1);
+      sessions[0].emit('Visit https://example.com/device to authorize\r\n');
+
+      const startRes = await startPromise;
+      const startBody = await startRes.json();
+      assert.equal(startBody.status, 'awaiting-code');
+
+      // Submit a code but never emit a recognized success/error pattern, so
+      // submitLoginCode's internal pollUntil genuinely times out and rejects.
+      const codeRes = await fetch(`${base}/api/login/code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: '111111' }),
+      });
+      await waitUntil(() => sessions[0].writes.includes('111111\r'));
+
+      assert.equal(codeRes.status, 200, 'a rejected submitLoginCode must not surface as a 500');
+      const codeBody = await codeRes.json();
+      assert.equal(codeBody.status, 'awaiting-code');
+      assert.ok(codeBody.error, 'error message should explain the failed detection');
+
+      const stateRes = await fetch(`${base}/api/login/state`);
+      const stateBody = await stateRes.json();
+      assert.equal(stateBody.status, 'awaiting-code', 'server state must not be stuck at submitting');
+      assert.ok(stateBody.error);
+
+      // Bonus: the pty/session survived the failed attempt, so a second
+      // submission on the same session still works.
+      fs.writeFileSync(path.join(configDir, '.credentials.json'), '{}');
+      const retryPromise = fetch(`${base}/api/login/code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: '222222' }),
+      });
+      await waitUntil(() => sessions[0].writes.includes('222222\r'));
+      sessions[0].emit('Login successful\r\n');
+      const retryRes = await retryPromise;
+      const retryBody = await retryRes.json();
+      assert.equal(retryBody.status, 'success');
+    },
+  );
+});
+
 test('POST /api/login/code without a code returns 400', async () => {
   const configDir = makeTmpConfigDir();
   await withServer(
