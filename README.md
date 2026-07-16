@@ -1,108 +1,113 @@
-# Claude Usage Scraper
+# Claude Usage Dashboard
 
-Scrapes Claude Code's interactive `/usage` panel and prints current usage as
-a one-shot CLI. There's no scriptable API for this data (`claude auth status`
-only reports login state, and `claude -p --output-format json` reports the
-cost of the single query just run, not account-wide plan usage) — this drives
-the real interactive TUI in a pty and reads the rendered screen.
-
-> **No network API.** This is a CLI and Docker image, not a server — there
-> are no HTTP endpoints. "API" below means the CLI's flags/exit codes, the
-> container's env vars and volume, and the internal JS module functions.
+Scrapes Claude Code's interactive `/usage` panel and serves it as a web
+dashboard and a JSON endpoint, from a single always-on Docker container.
+There's no scriptable API for this data (`claude auth status` only reports
+login state, and `claude -p --output-format json` reports the cost of the
+single query just run, not account-wide plan usage) — this drives the real
+interactive TUI in a pty and reads the rendered screen, on a background
+timer, and caches the result.
 
 ## Quick start
 
 ```sh
-docker build -t claude-usage .
-docker volume create claude-usage-data
-
-# One-time interactive login. Drops you into the real Claude Code TUI —
-# once it's ready, type /login and follow the prompts. It's a manual
-# paste-URL flow (visit the printed URL in any browser, paste the code
-# back) — no port publishing needed.
-docker run --rm -it -v claude-usage-data:/data claude-usage login
-
-# Fallback if you'd rather use a portable long-lived token instead:
-docker run --rm -it -v claude-usage-data:/data claude-usage login --token
-
-# Subsequent one-shot scrapes
-docker run --rm -v claude-usage-data:/data claude-usage
-docker run --rm -v claude-usage-data:/data claude-usage --json | jq .
-docker run --rm -v claude-usage-data:/data claude-usage --raw
+docker compose up --build
 ```
 
-### Or with Docker Compose
+Then visit **http://localhost:8080**.
 
-`docker-compose.yml` wraps the same commands so you don't have to retype
-volume mounts:
+- **First run (no stored credentials):** the page walks you through Claude
+  Code's login — click "Start login", visit the printed URL in any browser,
+  and paste the code back into the page. No `docker exec` or `-it` needed.
+- **After login:** credentials persist in the `claude-usage-data` named
+  volume, so restarting the container goes straight to the dashboard.
+- **Alternative to the web login:** copy [`.env.example`](.env.example) to
+  `.env` and set `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token` run
+  elsewhere) or `ANTHROPIC_API_KEY` — either skips the web login flow
+  entirely.
+
+### Or with plain `docker run`
 
 ```sh
-docker compose build
-docker compose run --rm login          # one-time interactive login
-docker compose run --rm login-token    # or: mint a portable long-lived token instead
-docker compose run --rm scrape         # one-shot scrape (human table)
-docker compose run --rm scrape --json  # flags pass through
+docker build -t claude-usage .
+docker volume create claude-usage-data
+docker run -d --name claude-usage -p 8080:8080 -v claude-usage-data:/data claude-usage
 ```
 
-Copy [`.env.example`](.env.example) to `.env` if you want to inject
-`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` — otherwise `.env` is
-optional and the browser-login volume is all you need.
+## Web dashboard & JSON endpoint
 
-## CLI reference
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/` | GET | Dashboard (authenticated) or login flow (not yet authenticated) |
+| `/api/usage` | GET | Cached `UsageInfo` as JSON (see [Data model](#data-model)) plus `lastUpdatedAt`/`stale`/`error`. Returns `503` before authentication. This is the endpoint other tools/runners should poll. |
+| `/api/refresh` | POST | Force an immediate re-scrape; returns the same shape as `/api/usage` |
+| `/api/login/state` | GET | `{ authenticated, status, loginUrl?, error? }` |
+| `/api/login/start` | POST | Begin the web-driven login flow |
+| `/api/login/code` | POST | `{ "code": "..." }` — submit the pasted-back login code |
 
+Usage data refreshes in the background every `USAGE_REFRESH_INTERVAL_MS`
+(default 5 minutes); `/api/usage` and the dashboard always serve the cached
+result instantly rather than triggering a scrape per request. Use the
+dashboard's "Refresh now" button, or `POST /api/refresh`, to force an
+immediate update.
+
+If a background refresh fails (timeout, unrecognized panel), the cache
+keeps the last good data and marks it `stale: true` with an `error` field,
+rather than discarding known-good data.
+
+## One-shot CLI (still available)
+
+The underlying scraper is also usable directly, without the server, for
+local scripting:
+
+```sh
+docker compose run --rm app node bin/claude-usage.js --json
 ```
-claude-usage [options]
+
+or, outside Docker (with `CLAUDE_CONFIG_DIR` pointed at a directory holding
+real Claude Code credentials):
+
+```sh
+npm install
+CLAUDE_CONFIG_DIR=~/.claude node bin/claude-usage.js
 ```
 
 | Flag | Description |
 |------|-------------|
 | *(none)* | Human-readable table on stdout (default) |
-| `--json` | Structured JSON on stdout (see [Data model](#data-model)); all logging goes to stderr so `\| jq` is always safe |
-| `--raw` | The raw extracted panel text verbatim — escape hatch if a future Claude Code UI change desyncs the parser |
+| `--json` | Structured JSON on stdout (see [Data model](#data-model)) |
+| `--raw` | The raw extracted panel text verbatim |
 | `--timeout <ms>` | Override the scrape's overall timeout (default `20000`) |
 | `-h`, `--help` | Show usage help and exit `0` |
 | `-v`, `--version` | Show the package version and exit `0` |
 
-### Exit codes
+### Exit codes (CLI only)
 
 | Code | Meaning |
 |------|---------|
 | `0` | Success |
 | `1` | Unexpected/internal error, or `CLAUDE_CONFIG_DIR` unset |
-| `2` | Not logged in — run `... login` |
-| `3` | Scrape timed out (panel never rendered — rate-limited, network issue, or unrecognized UI state; try `--raw` to see what was captured) |
-
-### Docker "commands"
-
-The image's entrypoint (`docker/entrypoint.sh`) branches on its first argument:
-
-| Invocation | Behavior |
-|------------|----------|
-| `docker run ... claude-usage` | Default: run the one-shot scrape (`bin/claude-usage.js`, forwarding any flags above) |
-| `docker run -it ... claude-usage login` | No credentials yet: exec the real `claude` TUI in `$CLAUDE_USAGE_WORKDIR` so you can run `/login` yourself |
-| `docker run -it ... claude-usage login --token` | Same, but runs `claude setup-token` instead — mints a portable long-lived token (`CLAUDE_CODE_OAUTH_TOKEN`) rather than a browser-session credential |
-
-If credentials already exist (`.credentials.json` in the volume, or
-`CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY` set), any first argument other
-than triggering the scrape is ignored — the container always goes straight
-to scraping once authenticated.
+| `3` | Scrape timed out |
 
 ## Environment variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CLAUDE_CONFIG_DIR` | `/data` (set in the image) | Where Claude Code's config/credentials live. Point this at your mounted volume; `bin/claude-usage.js` refuses to run (exit `1`) if it's unset. |
-| `CLAUDE_USAGE_WORKDIR` | `/home/node/workspace` (set in the image) | Fixed working directory `claude` is launched from — used both for the scrape and for the `login` TUI, and as the key `preseed.js` writes trust/onboarding flags under. |
-| `CLAUDE_CODE_OAUTH_TOKEN` | — | Long-lived token from `claude setup-token` (or `login --token`). Alternative to a `.credentials.json` session. |
+| `PORT` | `8080` | Port the web server listens on inside the container |
+| `USAGE_REFRESH_INTERVAL_MS` | `300000` | How often the background scrape refreshes cached usage data |
+| `CLAUDE_CONFIG_DIR` | `/data` (set in the image) | Where Claude Code's config/credentials live. Point this at your mounted volume. |
+| `CLAUDE_USAGE_WORKDIR` | `/home/node/workspace` (set in the image) | Fixed working directory `claude` is launched from — used for both the scrape and the login flow, and as the key `preseed.js` writes trust/onboarding flags under. |
+| `CLAUDE_CODE_OAUTH_TOKEN` | — | Long-lived token from `claude setup-token`. Alternative to completing the web login flow. |
 | `ANTHROPIC_API_KEY` | — | Direct API-key auth, alternative to a Claude subscription login. Note: usage-panel content differs for API-key accounts (cost estimates rather than plan-percentage bars). |
 
-No ports are exposed and none are needed — login is a manual paste-URL
-OAuth flow (see Quick start), not a local callback server.
+No built-in access control — the web UI (including the login code exchange)
+is assumed to sit behind trusted network access (localhost, private LAN, or
+your own reverse proxy/VPN).
 
 ## Data model
 
-`--json` (and the return value of `run()`/`scrapeUsage()` internally) is a
-`UsageInfo` object:
+`/api/usage` (and `--json`) returns a `UsageInfo` object, plus cache
+metadata:
 
 ```jsonc
 {
@@ -123,154 +128,129 @@ OAuth flow (see Quick start), not a local callback server.
       "detail": "Each subagent runs its own requests. Be deliberate about spawning them — and consider configuring a cheaper model for simpler subagents."
     }
   ],
-  "raw": "<full extracted panel text, always populated>"
+  "raw": "<full extracted panel text, always populated>",
+  "lastUpdatedAt": "2026-07-16T12:00:00.000Z",
+  "stale": false,
+  "error": null
 }
 ```
 
 - **`bars`** — one entry per progress bar shown (session window, weekly
-  all-models, and any per-model weekly bars, e.g. per promotional or
-  secondary model). `resetsText` is the panel's own verbatim relative-time
-  string (e.g. `"Resets 12:29pm (America/New_York)"`); `null` when the panel
-  doesn't show a reset line for that bar (seen for `0%`-used per-model bars).
+  all-models, and any per-model weekly bars). `resetsText` is the panel's
+  own verbatim relative-time string; `null` when the panel doesn't show a
+  reset line for that bar.
 - **`session`** — the "Session" block's local cost/duration estimate for
-  this Claude Code invocation. `totalCostUsd` is `null` if unparsable.
+  the scrape's Claude Code invocation. `totalCostUsd` is `null` if
+  unparsable.
 - **`characteristics`** — the "What's contributing to your limits usage?"
-  entries, when the panel's async local-session scan finished rendering
-  before the scrape's stabilization check fired. Often empty — the scan can
-  still say "Scanning local sessions…" when the scrape completes, which is
-  not treated as an error.
+  entries. Often empty — the scan can still be in progress when the scrape
+  completes, which is not treated as an error.
 - **`raw`** — always populated, regardless of how much else parsed
-  successfully. The parser never throws on unrecognized input; it just
-  leaves the corresponding array/field empty.
+  successfully.
+- **`lastUpdatedAt`** — ISO timestamp of the last successful background
+  scrape, or `null` before the first one completes.
+- **`stale`** — `true` if the most recent background refresh failed (the
+  fields above are from the last successful scrape).
+- **`error`** — the most recent refresh failure's message, or `null`.
 
 ## Module API
 
-Not published as an npm package — these are documented for development and
-for embedding directly (`import { ... } from './src/...js'`) in another Node
-tool. All modules are ES modules (`"type": "module"`).
+Not published as an npm package — documented for development.
 
 ### `src/usageParser.js`
 
 ```ts
 parseUsage(text: string): UsageInfo
 ```
-Pure function. Parses the plain-text lines of a rendered `/usage` panel (as
-produced by `TerminalBuffer#getText()`) into the `UsageInfo` shape described
-above. Tolerant by design: unrecognized lines are ignored, and unparsable
-input still returns a valid object with empty arrays and a populated `raw`
-field rather than throwing.
+Pure function. Parses the plain-text lines of a rendered `/usage` panel
+into the `UsageInfo` shape above. Tolerant by design: unrecognized lines
+are ignored.
 
 ### `src/usageDriver.js`
 
 ```ts
 scrapeUsage(session: PtySessionLike, options?: {
-  readyQuietMs?: number,   // default 800  — quiet time before considering the initial prompt "ready"
-  readyTimeoutMs?: number, // default 15000 — bound on waiting for readiness
-  stableQuietMs?: number,  // default 500  — quiet time before considering the /usage panel "settled"
-  stableTimeoutMs?: number,// default 20000 — bound on waiting for the panel to render
+  readyQuietMs?: number, readyTimeoutMs?: number,
+  stableQuietMs?: number, stableTimeoutMs?: number,
 }): Promise<UsageInfo>
 ```
-Drives a pty session through the full `/usage` flow: waits for the initial
-prompt to go quiet, writes `/usage\r`, waits for the rendered screen to both
-go quiet *and* match a "this looks like the usage panel" marker (`/%\s*used/i`),
-then parses the final screen text. Rejects with an `Error` if either wait
-exceeds its timeout. `session` only needs `.onData(callback)` and
-`.write(data)` — satisfied by `PtySession` below, or any test double (see
-`test/usageDriver.test.js` for the pattern used to test this without a real
-`claude` process).
+Drives a pty session through the full `/usage` flow.
 
-### `src/ptySession.js`
+### `src/loginDriver.js`
 
 ```ts
-class PtySession {
-  constructor(command: string, args?: string[], options?: {
-    cols?: number, rows?: number, cwd?: string, env?: NodeJS.ProcessEnv,
-  })
-  readonly pid: number
-  onData(callback: (chunk: string) => void): void
-  write(data: string): void
-  close(options?: { exitCommand?: string, timeoutMs?: number }): Promise<void>
+startLogin(session: PtySessionLike, options?: {
+  readyQuietMs?: number, readyTimeoutMs?: number,
+  urlQuietMs?: number, urlTimeoutMs?: number,
+}): Promise<{ term: TerminalBuffer, loginUrl: string }>
+
+submitLoginCode(session: PtySessionLike, term: TerminalBuffer, code: string, options?: {
+  resultQuietMs?: number, resultTimeoutMs?: number,
+}): Promise<{ success: true } | { success: false, message: string }>
+```
+Drives a pty session through `/login`: extracts the authorization URL, then
+submits the pasted-back code and reports success/failure.
+
+### `src/usageCache.js`
+
+```ts
+createUsageCache(options: { scrapeUsage: () => Promise<UsageInfo>, intervalMs: number }): {
+  start(): void, stop(): void, refresh(): Promise<void>,
+  getState(): { data: UsageInfo | null, lastUpdatedAt: Date | null, stale: boolean, error: string | null },
 }
 ```
-Thin `node-pty` wrapper with guaranteed cleanup. `close()` optionally writes
-an exit command first, then waits up to half of `timeoutMs` (default `2000`)
-for the child to exit naturally, escalating to `SIGTERM` and then `SIGKILL`
-if it doesn't — so a crashed scrape never leaves an orphaned `claude`
-process behind.
+Background-refreshed cache. Keeps the last good `data` on a failed refresh,
+marking `stale: true` instead of discarding it.
 
-### `src/terminalBuffer.js`
+### `src/credentials.js`
 
 ```ts
-class TerminalBuffer {
-  constructor(options?: { cols?: number, rows?: number })
-  write(data: string): Promise<void>
-  msSinceLastWrite(): number
-  waitQuiet(quietMs: number, timeoutMs: number): Promise<void>
-  getText(): string
-}
+hasCredentials(configDir: string): boolean
 ```
-Wraps `@xterm/headless` to maintain a real virtual screen buffer — necessary
-because Claude Code's Ink-based TUI does cursor-relative partial redraws, so
-naively regexing the raw ANSI byte stream is unreliable. `write()` is
-asynchronous (xterm's internal parser is), and returns a promise that
-resolves once that chunk has been fully applied to the buffer.
-`waitQuiet(quietMs, timeoutMs)` resolves once `quietMs` has elapsed since
-the last `write()` call, or rejects once `timeoutMs` elapses first — this is
-the building block `usageDriver.js` polls against.
+True if `.credentials.json` exists in `configDir`, or
+`CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY` is set.
 
-### `src/preseed.js`
+### `src/htmlView.js`
 
 ```ts
-preseed(configDir: string, workDir: string): void
+renderDashboard(state: { data: UsageInfo | null, lastUpdatedAt: Date | null, stale: boolean, error: string | null }): string
+renderLoginPage(loginState: { status: string, loginUrl?: string, error?: string }): string
 ```
-Idempotently merges onboarding/trust flags into
-`$CLAUDE_CONFIG_DIR/.claude.json` (`hasCompletedOnboarding`, `autoUpdates:
-false`, `bypassPermissionsModeAccepted: false`, plus a `projects[workDir]`
-entry with `hasTrustDialogAccepted: true`) so the TUI skips the
-theme-selection and trust dialogs when launched non-interactively for the
-scrape. Preserves any unrelated existing keys in `.claude.json`. Never reads
-or writes `.credentials.json`.
+Pure server-rendered HTML, no build step.
 
-### `src/format.js`
+### `src/server.js`
 
 ```ts
-formatHuman(usage: UsageInfo): string   // e.g. "Current session: 36% used (Resets 12:29pm (America/New_York))"
-formatJson(usage: UsageInfo): string    // JSON.stringify(usage, null, 2)
+createServer(options: {
+  configDir: string, workDir: string, intervalMs?: number,
+  spawnSession?: () => PtySessionLike,
+  scrapeOptions?: object, loginOptions?: object,
+}): http.Server
 ```
+Wires the cache, login flow, and views together behind the routes listed
+above. Returns an unstarted server — call `.listen(port)`.
 
-### `src/index.js`
+### `src/ptySession.js`, `src/terminalBuffer.js`, `src/preseed.js`, `src/format.js`, `src/pollUntil.js`
 
-```ts
-parseCliArgs(argv: string[]): {
-  json: boolean, raw: boolean, timeoutMs: number, help: boolean, version: boolean,
-}
-
-run(options?: {
-  timeoutMs: number, json: boolean, raw: boolean,
-  workDir?: string,   // default: $CLAUDE_USAGE_WORKDIR or process.cwd()
-  configDir?: string, // default: $CLAUDE_CONFIG_DIR
-}): Promise<number>   // resolves to an exit code: 0 success, 3 timeout/scrape error
-```
-`parseCliArgs` is a pure argv parser (thin wrapper over `node:util`'s
-`parseArgs`). `run()` is the full orchestration: `preseed()` → spawn a
-`PtySession` for `claude` → `scrapeUsage()` → format per `json`/`raw` →
-print to stdout → `session.close({ exitCommand: '/exit\r' })` in a
-`finally`, guaranteeing cleanup even on error. It assumes credentials
-already exist — the "not logged in" case (exit `2`) is handled upstream by
-`docker/entrypoint.sh` before `run()` is ever invoked.
+Unchanged from before, except `pollUntil` (the terminal-settle polling
+helper) moved out of `usageDriver.js` into its own module so
+`loginDriver.js` can share it.
 
 ## Development
 
 ```sh
 npm install
 npm test
+npm start   # runs the web server locally; needs CLAUDE_CONFIG_DIR set
 ```
 
-`test/fixtures/usage-subscription.txt` is a real captured `/usage` screen
-(hand-captured, PII redacted) used to test `usageParser.js` without needing
-a live login. If Claude Code changes the panel's rendered text in a future
-release, capture a fresh one the same way and update the parser/fixture.
+`test/fixtures/usage-subscription.txt`, `test/fixtures/login-url-screen.txt`,
+and `test/fixtures/login-success-screen.txt` are real captured screens
+(hand-captured, PII redacted) used to test the parsers/drivers without
+needing a live login. If a future Claude Code release changes either
+screen's rendered text, capture a fresh one the same way and update the
+relevant fixture/regex.
 
 Bumping the pinned `@anthropic-ai/claude-code` version in the Dockerfile:
 update the version in both the `npm install -g` line and re-verify the
-fixture/parser still match the new release's rendered output.
+fixtures/parsers still match the new release's rendered output.
