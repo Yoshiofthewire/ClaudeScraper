@@ -93,7 +93,7 @@ CLAUDE_CONFIG_DIR=~/.claude node bin/claude-usage.js
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `PORT` | `8080` | Port the web server listens on inside the container |
+| `PORT` | `8080` | Under `docker compose up` (the Quick start workflow), the *host* port to publish — the container always listens on 8080 internally, regardless of this value. When running the server entrypoint directly (`npm start`, or `docker run` without compose), `PORT` sets the actual internal listen port. |
 | `USAGE_REFRESH_INTERVAL_MS` | `300000` | How often the background scrape refreshes cached usage data |
 | `CLAUDE_CONFIG_DIR` | `/data` (set in the image) | Where Claude Code's config/credentials live. Point this at your mounted volume. |
 | `CLAUDE_USAGE_WORKDIR` | `/home/node/workspace` (set in the image) | Fixed working directory `claude` is launched from — used for both the scrape and the login flow, and as the key `preseed.js` writes trust/onboarding flags under. |
@@ -229,6 +229,25 @@ createServer(options: {
 ```
 Wires the cache, login flow, and views together behind the routes listed
 above. Returns an unstarted server — call `.listen(port)`.
+
+### `src/index.js`
+
+```ts
+parseCliArgs(argv: string[]): {
+  json: boolean, raw: boolean, timeoutMs: number, help: boolean, version: boolean,
+}
+
+run(options?: {
+  timeoutMs: number, json?: boolean, raw?: boolean,
+  workDir?: string, configDir?: string,
+}): Promise<0 | 3>
+```
+Orchestrates the [one-shot CLI](#one-shot-cli-still-available)
+(`bin/claude-usage.js`): `parseCliArgs` turns raw argv into parsed options,
+and `run` preseeds config, drives a pty session through the `/usage` scrape,
+writes human/JSON/raw output to stdout, and resolves to an exit code (`0`
+on success, `3` on scrape timeout or other error). `workDir`/`configDir`
+default to `CLAUDE_USAGE_WORKDIR`/`CLAUDE_CONFIG_DIR`.
 
 ### `src/ptySession.js`, `src/terminalBuffer.js`, `src/preseed.js`, `src/format.js`, `src/pollUntil.js`
 
