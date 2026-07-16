@@ -1,8 +1,8 @@
 import { TerminalBuffer } from './terminalBuffer.js';
 import { pollUntil } from './pollUntil.js';
 
-const URL_RE = /(https:\/\/\S+)/;
-const SUCCESS_RE = /(login successful|logged in|authentication successful)/i;
+export const URL_RE = /(https:\/\/\S+)/;
+export const SUCCESS_RE = /(login successful|logged in|authentication successful)/i;
 const ERROR_RE = /(invalid code|expired|login failed|try again)/i;
 
 function hasUrl(text) {

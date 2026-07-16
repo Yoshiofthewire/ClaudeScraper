@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { startLogin, submitLoginCode } from '../src/loginDriver.js';
+import { startLogin, submitLoginCode, URL_RE, SUCCESS_RE } from '../src/loginDriver.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -95,11 +95,11 @@ test('submitLoginCode: full flow from URL to a rejected code', async () => {
 
 test('startLogin extracts the URL from the real captured fixture', () => {
   const text = fs.readFileSync(path.join(__dirname, 'fixtures/login-url-screen.txt'), 'utf8');
-  const match = text.match(/(https:\/\/\S+)/);
+  const match = text.match(URL_RE);
   assert.ok(match, 'expected the real login fixture to contain a matchable https:// URL');
 });
 
 test('submitLoginCode recognizes success in the real captured fixture', () => {
   const text = fs.readFileSync(path.join(__dirname, 'fixtures/login-success-screen.txt'), 'utf8');
-  assert.match(text, /(login successful|logged in|authentication successful)/i);
+  assert.match(text, SUCCESS_RE);
 });
