@@ -31,6 +31,23 @@ docker run --rm -v claude-usage-data:/data claude-usage --json | jq .
 docker run --rm -v claude-usage-data:/data claude-usage --raw
 ```
 
+### Or with Docker Compose
+
+`docker-compose.yml` wraps the same commands so you don't have to retype
+volume mounts:
+
+```sh
+docker compose build
+docker compose run --rm login          # one-time interactive login
+docker compose run --rm login-token    # or: mint a portable long-lived token instead
+docker compose run --rm scrape         # one-shot scrape (human table)
+docker compose run --rm scrape --json  # flags pass through
+```
+
+Copy [`.env.example`](.env.example) to `.env` if you want to inject
+`CLAUDE_CODE_OAUTH_TOKEN` or `ANTHROPIC_API_KEY` — otherwise `.env` is
+optional and the browser-login volume is all you need.
+
 ## CLI reference
 
 ```
