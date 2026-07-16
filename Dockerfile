@@ -22,11 +22,12 @@ COPY package.json ./
 COPY bin/ ./bin/
 COPY src/ ./src/
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
-RUN chmod +x ./docker/entrypoint.sh ./bin/claude-usage.js
+RUN chmod +x ./docker/entrypoint.sh ./bin/claude-usage.js ./bin/claude-usage-server.js
 
 ENV CLAUDE_CONFIG_DIR=/data
 ENV CLAUDE_USAGE_WORKDIR=/home/node/workspace
 VOLUME /data
+EXPOSE 8080
 
 ENTRYPOINT ["tini", "--", "/app/docker/entrypoint.sh"]
 CMD []

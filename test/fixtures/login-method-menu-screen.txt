@@ -1,0 +1,39 @@
+ ▐▛███▜▌   Claude Code v2.1.211
+▝▜█████▛▘  Opus 4.8 (1M context) · API Usage Billing
+  ▘▘ ▝▝    /home/node/workspace
+
+
+❯ /login                                                                                                                
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Login
+
+  Claude Code can be used with your Claude subscription or billed based on API usage through your Console account.
+
+  Select login method:
+
+  ❯ 1. Claude account with subscription · Pro, Max, Team, or Enterprise
+    2. Anthropic Console account · API usage billing
+    3. 3rd-party platform · Amazon Bedrock, Microsoft Foundry, or Vertex AI
+
+  Esc to cancel
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
