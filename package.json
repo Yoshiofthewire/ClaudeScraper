@@ -1,0 +1,23 @@
+{
+  "name": "claude-usage",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Scrapes Claude Code's interactive /usage panel and prints it as a one-shot CLI",
+  "type": "module",
+  "bin": {
+    "claude-usage": "./bin/claude-usage.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@xterm/headless": "^5.5.0",
+    "node-pty": "^1.1.0"
+  },
+  "allowScripts": {
+    "node-pty@1.1.0": true
+  }
+}
