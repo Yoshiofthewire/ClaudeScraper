@@ -17,7 +17,9 @@ export function createUsageCache({ scrapeUsage, intervalMs, onReset }) {
         lastUpdatedAt = new Date();
         error = null;
         if (resetDetected && onReset) {
-          Promise.resolve(onReset()).catch(() => {});
+          Promise.resolve()
+            .then(() => onReset())
+            .catch(() => {});
         }
       })
       .catch((err) => {

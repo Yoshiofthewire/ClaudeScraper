@@ -150,3 +150,27 @@ test('does not throw when a reset is detected but no onReset callback was provid
   await cache.refresh();
   await assert.doesNotReject(cache.refresh());
 });
+
+test('a synchronously-throwing onReset does not corrupt data/stale/error state', async () => {
+  let call = 0;
+  const scrapes = [
+    { bars: [{ label: 'Current session', pctUsed: 80, resetsText: null }], session: {}, characteristics: [], raw: '' },
+    { bars: [{ label: 'Current session', pctUsed: 5, resetsText: null }], session: {}, characteristics: [], raw: '' },
+  ];
+  const cache = createUsageCache({
+    scrapeUsage: async () => scrapes[call++],
+    intervalMs: 10000,
+    onReset: () => { throw new Error('sync boom'); },
+  });
+
+  await cache.refresh();
+  await cache.refresh();
+
+  // Give the deferred onReset()'s rejection a tick to be (safely) swallowed.
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  const state = cache.getState();
+  assert.equal(state.data.bars[0].pctUsed, 5);
+  assert.equal(state.stale, false);
+  assert.equal(state.error, null);
+});
