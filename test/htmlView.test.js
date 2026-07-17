@@ -112,3 +112,8 @@ test('renderDashboard includes a Settings link once data is present', () => {
   });
   assert.match(html, /href="\/settings"/);
 });
+
+test('renderSettings no longer claims automatic sending is unwired', () => {
+  const html = renderSettings({ plan: null, helloPromptOnReset: false });
+  assert.doesNotMatch(html, /isn't wired up yet/);
+});

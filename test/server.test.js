@@ -49,6 +49,7 @@ async function withServer(opts, fn) {
 
 const FAST_SCRAPE_OPTIONS = { readyQuietMs: 20, readyTimeoutMs: 500, stableQuietMs: 20, stableTimeoutMs: 500 };
 const FAST_LOGIN_OPTIONS = { readyQuietMs: 20, readyTimeoutMs: 500, methodMenuQuietMs: 20, methodMenuTimeoutMs: 500, urlQuietMs: 20, urlTimeoutMs: 500, resultQuietMs: 20, resultTimeoutMs: 500 };
+const FAST_HELLO_OPTIONS = { readyQuietMs: 20, readyTimeoutMs: 500, responseQuietMs: 20, responseTimeoutMs: 500 };
 const METHOD_MENU_SCREEN = '  Select login method:\r\n\r\n  ❯ 1. Claude account with subscription\r\n';
 
 test('GET /api/usage returns 503 before authentication', async () => {
@@ -470,6 +471,115 @@ test('POST /api/refresh includes the plan field from settings', async () => {
       const body = await res.json();
       assert.equal(body.plan, 'Pro');
       assert.equal(body.bars?.[0]?.pctUsed, 75);
+    },
+  );
+});
+
+test('a detected reset spawns a Hello-prompt session when helloPromptOnReset is enabled', async () => {
+  const configDir = makeTmpConfigDir();
+  fs.writeFileSync(path.join(configDir, '.credentials.json'), '{}');
+  const sessions = [];
+  await withServer(
+    {
+      configDir,
+      workDir: '/tmp',
+      intervalMs: 60000,
+      scrapeOptions: FAST_SCRAPE_OPTIONS,
+      helloPromptOptions: FAST_HELLO_OPTIONS,
+      spawnSession: () => {
+        const s = new ScriptedSession();
+        sessions.push(s);
+        return s;
+      },
+    },
+    async (base) => {
+      await fetch(`${base}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ helloPromptOnReset: true }),
+      });
+
+      // Let the background scrape (session 0) establish a baseline pctUsed.
+      await waitUntil(() => sessions.length >= 1);
+      sessions[0].emit('❯ ready\r\n');
+      await waitUntil(() => sessions[0].writes.includes('/usage\r'));
+      sessions[0].emit('Current session\n80% used\nResets 1pm\n');
+
+      let pctUsed;
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const res = await fetch(`${base}/api/usage`);
+        const body = await res.json();
+        pctUsed = body.bars?.[0]?.pctUsed;
+        if (pctUsed === 80) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(pctUsed, 80);
+
+      // Force a second scrape (session 1) reporting a lower pctUsed than the baseline.
+      const refreshPromise = fetch(`${base}/api/refresh`, { method: 'POST' });
+      await waitUntil(() => sessions.length >= 2);
+      sessions[1].emit('❯ ready\r\n');
+      await waitUntil(() => sessions[1].writes.includes('/usage\r'));
+      sessions[1].emit('Current session\n5% used\nResets 6pm\n');
+      await refreshPromise;
+
+      // The detected reset spawns a third session and drives it through the Hello exchange.
+      await waitUntil(() => sessions.length >= 3);
+      sessions[2].emit('❯ ready\r\n');
+      await waitUntil(() => sessions[2].writes.includes('Hello\r'));
+      sessions[2].emit('Hello! How can I help?\r\n');
+
+      assert.equal(sessions[2].writes.includes('Hello\r'), true);
+    },
+  );
+});
+
+test('a detected reset does not spawn a Hello-prompt session when helloPromptOnReset is disabled', async () => {
+  const configDir = makeTmpConfigDir();
+  fs.writeFileSync(path.join(configDir, '.credentials.json'), '{}');
+  const sessions = [];
+  await withServer(
+    {
+      configDir,
+      workDir: '/tmp',
+      intervalMs: 60000,
+      scrapeOptions: FAST_SCRAPE_OPTIONS,
+      helloPromptOptions: FAST_HELLO_OPTIONS,
+      spawnSession: () => {
+        const s = new ScriptedSession();
+        sessions.push(s);
+        return s;
+      },
+    },
+    async (base) => {
+      // helloPromptOnReset defaults to false — settings left untouched.
+      await waitUntil(() => sessions.length >= 1);
+      sessions[0].emit('❯ ready\r\n');
+      await waitUntil(() => sessions[0].writes.includes('/usage\r'));
+      sessions[0].emit('Current session\n80% used\nResets 1pm\n');
+
+      let pctUsed;
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const res = await fetch(`${base}/api/usage`);
+        const body = await res.json();
+        pctUsed = body.bars?.[0]?.pctUsed;
+        if (pctUsed === 80) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(pctUsed, 80);
+
+      const refreshPromise = fetch(`${base}/api/refresh`, { method: 'POST' });
+      await waitUntil(() => sessions.length >= 2);
+      sessions[1].emit('❯ ready\r\n');
+      await waitUntil(() => sessions[1].writes.includes('/usage\r'));
+      sessions[1].emit('Current session\n5% used\nResets 6pm\n');
+      await refreshPromise;
+
+      // Give any (incorrect) Hello-send a chance to happen before asserting it didn't.
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(sessions.length, 2, 'no third session should be spawned when the toggle is off');
     },
   );
 });

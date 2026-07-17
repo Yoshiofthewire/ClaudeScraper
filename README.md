@@ -67,9 +67,10 @@ manage:
   or `Max x20`). Claude Code doesn't expose this itself, so it's recorded
   here and merged into `/api/usage`'s response as a `plan` field, for
   consumers that want it as context alongside the usage bars.
-- **Hello prompt on reset** — a toggle to record a preference for sending a
-  "Hello" prompt after every usage-window reset. Currently a stored
-  preference only — the automatic sending isn't wired up yet.
+- **Hello prompt on reset** — a toggle to automatically send a "Hello"
+  prompt through Claude Code whenever a usage bar's window resets (detected
+  by a drop in that bar's % used between background scrapes). Off by
+  default; enable it on the settings page.
 - **Pair a mobile app** — a placeholder for a future mobile pairing QR code.
 
 Settings persist in `settings.json` in the same `CLAUDE_CONFIG_DIR`-mounted

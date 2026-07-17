@@ -256,7 +256,6 @@ export function renderSettings(settings) {
           <input type="checkbox" id="hello-prompt-toggle" ${helloPromptOnReset ? 'checked' : ''} onchange="setHelloPrompt()" />
           Send a "Hello" prompt after every usage-window reset
         </label>
-        <p class="muted small">Saves your preference — automatic sending isn't wired up yet.</p>
       </div>
 
       <div class="section">

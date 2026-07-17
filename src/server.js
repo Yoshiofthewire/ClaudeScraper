@@ -5,6 +5,7 @@ import { startLogin, submitLoginCode } from './loginDriver.js';
 import { renderDashboard, renderLoginPage, renderSettings } from './htmlView.js';
 import { PtySession } from './ptySession.js';
 import { scrapeUsage as scrapeUsagePanel } from './usageDriver.js';
+import { sendHelloPrompt } from './helloPromptDriver.js';
 import { preseed } from './preseed.js';
 import { loadSettings, saveSettings } from './settings.js';
 
@@ -20,6 +21,7 @@ export function createServer({
   }),
   scrapeOptions = {},
   loginOptions = {},
+  helloPromptOptions = {},
 } = {}) {
   preseed(configDir, workDir);
 
@@ -35,6 +37,19 @@ export function createServer({
         return await scrapeUsagePanel(session, scrapeOptions);
       } finally {
         await session.close({ exitCommand: '/exit\r' });
+      }
+    },
+    onReset: async () => {
+      const settings = loadSettings(configDir);
+      if (!settings.helloPromptOnReset) return;
+      const session = spawnSession();
+      try {
+        await sendHelloPrompt(session, helloPromptOptions);
+        console.log('[hello-prompt] sent after usage-window reset');
+      } catch (err) {
+        console.error(`[hello-prompt] failed: ${err.message}`);
+      } finally {
+        await session.close({ exitCommand: '/exit\r' }).catch(() => {});
       }
     },
   });
