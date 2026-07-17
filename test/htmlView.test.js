@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { renderDashboard, renderLoginPage } from '../src/htmlView.js';
+import { renderDashboard, renderLoginPage, renderSettings } from '../src/htmlView.js';
 
 test('renderDashboard shows a waiting message before first scrape', () => {
   const html = renderDashboard({ data: null, lastUpdatedAt: null, stale: false, error: null });
@@ -69,4 +69,46 @@ test('renderLoginPage shows the error banner and a retry button', () => {
   assert.match(html, /banner-error/);
   assert.match(html, /invalid code/);
   assert.match(html, /Try again/);
+});
+
+test('renderSettings shows plan options with the current plan checked', () => {
+  const html = renderSettings({ plan: 'Max', helloPromptOnReset: false });
+  assert.match(html, /value="Pro"/);
+  assert.match(html, /value="Max x20"/);
+  assert.match(html, /value="Max"[^>]*checked/);
+});
+
+test('renderSettings shows the hello-prompt toggle checked when enabled', () => {
+  const html = renderSettings({ plan: null, helloPromptOnReset: true });
+  assert.match(html, /id="hello-prompt-toggle"[^>]*checked/);
+});
+
+test('renderSettings shows the hello-prompt toggle unchecked when disabled', () => {
+  const html = renderSettings({ plan: null, helloPromptOnReset: false });
+  assert.doesNotMatch(html, /id="hello-prompt-toggle"[^>]*checked/);
+});
+
+test('renderSettings shows the mobile pairing QR placeholder', () => {
+  const html = renderSettings({ plan: null, helloPromptOnReset: false });
+  assert.match(html, /QR code coming soon/);
+});
+
+test('renderSettings has a link back to the dashboard', () => {
+  const html = renderSettings({ plan: null, helloPromptOnReset: false });
+  assert.match(html, /href="\/"/);
+});
+
+test('renderDashboard includes a Settings link before the first scrape', () => {
+  const html = renderDashboard({ data: null, lastUpdatedAt: null, stale: false, error: null });
+  assert.match(html, /href="\/settings"/);
+});
+
+test('renderDashboard includes a Settings link once data is present', () => {
+  const html = renderDashboard({
+    data: { bars: [], session: {}, characteristics: [], raw: '' },
+    lastUpdatedAt: new Date(),
+    stale: false,
+    error: null,
+  });
+  assert.match(html, /href="\/settings"/);
 });

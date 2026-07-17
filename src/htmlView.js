@@ -105,6 +105,10 @@ function renderPage(title, bodyHtml) {
   form { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
   input { flex: 1; }
   a { color: #2563eb; word-break: break-all; }
+  .header-actions { display: flex; align-items: center; gap: 0.75rem; }
+  .plan-options { display: flex; gap: 1rem; margin-top: 0.5rem; }
+  .plan-option { display: flex; align-items: center; gap: 0.35rem; font-size: 0.9rem; }
+  .qr-placeholder { border: 1px dashed #d1d5db; border-radius: 8px; padding: 2rem; text-align: center; color: #6b7280; font-size: 0.85rem; margin-top: 0.5rem; }
 </style>
 </head>
 <body>
@@ -119,7 +123,10 @@ export function renderDashboard(state) {
   if (!data) {
     return renderPage('Claude Usage', `
       <div class="card">
-        <h1>Claude Usage</h1>
+        <div class="header-row">
+          <h1>Claude Usage</h1>
+          <a href="/settings">Settings</a>
+        </div>
         <p class="muted">Waiting for the first scrape to complete…</p>
         ${error ? `<div class="banner banner-error">${escapeHtml(error)}</div>` : ''}
       </div>
@@ -133,7 +140,10 @@ export function renderDashboard(state) {
     <div class="card">
       <div class="header-row">
         <h1>Claude Usage</h1>
-        <button id="refresh-btn" onclick="refresh()">Refresh now</button>
+        <div class="header-actions">
+          <a href="/settings">Settings</a>
+          <button id="refresh-btn" onclick="refresh()">Refresh now</button>
+        </div>
       </div>
       ${stale ? `<div class="banner banner-warn">Showing last known data — most recent refresh failed: ${escapeHtml(error)}</div>` : ''}
       <div class="bars">${renderBars(data.bars)}</div>
@@ -212,6 +222,64 @@ export function renderLoginPage(loginState = { status: 'idle' }) {
         return false;
       }
       ${status === 'awaiting-code' ? 'setTimeout(() => location.reload(), 15000);' : ''}
+    </script>
+  `);
+}
+
+const PLAN_OPTIONS = ['Pro', 'Max', 'Max x20'];
+
+export function renderSettings(settings) {
+  const { plan, helloPromptOnReset } = settings;
+
+  const planRadios = PLAN_OPTIONS.map((p) => `
+    <label class="plan-option">
+      <input type="radio" name="plan" value="${escapeHtml(p)}" ${plan === p ? 'checked' : ''} onchange="setPlan('${escapeHtml(p)}')" />
+      ${escapeHtml(p)}
+    </label>
+  `).join('');
+
+  return renderPage('Claude Usage — Settings', `
+    <div class="card">
+      <div class="header-row">
+        <h1>Settings</h1>
+        <a href="/">Back to dashboard</a>
+      </div>
+
+      <div class="section">
+        <h2>Plan</h2>
+        <div class="plan-options">${planRadios}</div>
+      </div>
+
+      <div class="section">
+        <h2>Hello prompt on reset</h2>
+        <label>
+          <input type="checkbox" id="hello-prompt-toggle" ${helloPromptOnReset ? 'checked' : ''} onchange="setHelloPrompt()" />
+          Send a "Hello" prompt after every usage-window reset
+        </label>
+        <p class="muted small">Saves your preference — automatic sending isn't wired up yet.</p>
+      </div>
+
+      <div class="section">
+        <h2>Pair a mobile app</h2>
+        <div class="qr-placeholder">QR code coming soon</div>
+      </div>
+    </div>
+    <script>
+      async function setPlan(plan) {
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ plan }),
+        });
+      }
+      async function setHelloPrompt() {
+        const input = document.getElementById('hello-prompt-toggle');
+        await fetch('/api/settings', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ helloPromptOnReset: input.checked }),
+        });
+      }
     </script>
   `);
 }
