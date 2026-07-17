@@ -1,4 +1,6 @@
-export function createUsageCache({ scrapeUsage, intervalMs }) {
+import { detectReset } from './resetDetector.js';
+
+export function createUsageCache({ scrapeUsage, intervalMs, onReset }) {
   let data = null;
   let lastUpdatedAt = null;
   let error = null;
@@ -7,11 +9,16 @@ export function createUsageCache({ scrapeUsage, intervalMs }) {
 
   function refresh() {
     if (inFlight) return inFlight;
+    const previousBars = data?.bars ?? null;
     inFlight = scrapeUsage()
       .then((result) => {
+        const resetDetected = detectReset(previousBars, result.bars);
         data = result;
         lastUpdatedAt = new Date();
         error = null;
+        if (resetDetected && onReset) {
+          Promise.resolve(onReset()).catch(() => {});
+        }
       })
       .catch((err) => {
         error = err.message;

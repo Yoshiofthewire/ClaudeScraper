@@ -84,3 +84,69 @@ test('start() refreshes immediately then again on each interval tick', async () 
   await new Promise((resolve) => setTimeout(resolve, 60));
   assert.equal(calls, callsAfterStop);
 });
+
+test('onReset fires when a bar\'s pctUsed drops between refreshes', async () => {
+  let call = 0;
+  const scrapes = [
+    { bars: [{ label: 'Current session', pctUsed: 80, resetsText: null }], session: {}, characteristics: [], raw: '' },
+    { bars: [{ label: 'Current session', pctUsed: 5, resetsText: null }], session: {}, characteristics: [], raw: '' },
+  ];
+  let resetFired = 0;
+  const cache = createUsageCache({
+    scrapeUsage: async () => scrapes[call++],
+    intervalMs: 10000,
+    onReset: () => { resetFired++; },
+  });
+
+  await cache.refresh();
+  assert.equal(resetFired, 0, 'no previous data on the first scrape, so no reset should fire');
+
+  await cache.refresh();
+  assert.equal(resetFired, 1);
+});
+
+test('onReset does not fire when usage only increases', async () => {
+  let call = 0;
+  const scrapes = [
+    { bars: [{ label: 'Current session', pctUsed: 10, resetsText: null }], session: {}, characteristics: [], raw: '' },
+    { bars: [{ label: 'Current session', pctUsed: 20, resetsText: null }], session: {}, characteristics: [], raw: '' },
+  ];
+  let resetFired = 0;
+  const cache = createUsageCache({
+    scrapeUsage: async () => scrapes[call++],
+    intervalMs: 10000,
+    onReset: () => { resetFired++; },
+  });
+
+  await cache.refresh();
+  await cache.refresh();
+  assert.equal(resetFired, 0);
+});
+
+test('refresh() resolves without waiting for onReset to settle', async () => {
+  let call = 0;
+  const scrapes = [
+    { bars: [{ label: 'Current session', pctUsed: 80, resetsText: null }], session: {}, characteristics: [], raw: '' },
+    { bars: [{ label: 'Current session', pctUsed: 5, resetsText: null }], session: {}, characteristics: [], raw: '' },
+  ];
+  const cache = createUsageCache({
+    scrapeUsage: async () => scrapes[call++],
+    intervalMs: 10000,
+    onReset: () => new Promise(() => {}), // never resolves
+  });
+
+  await cache.refresh();
+  await cache.refresh(); // must not hang, even though onReset's promise never settles
+  assert.equal(cache.getState().data.bars[0].pctUsed, 5);
+});
+
+test('does not throw when a reset is detected but no onReset callback was provided', async () => {
+  let call = 0;
+  const scrapes = [
+    { bars: [{ label: 'Current session', pctUsed: 80, resetsText: null }], session: {}, characteristics: [], raw: '' },
+    { bars: [{ label: 'Current session', pctUsed: 5, resetsText: null }], session: {}, characteristics: [], raw: '' },
+  ];
+  const cache = createUsageCache({ scrapeUsage: async () => scrapes[call++], intervalMs: 10000 });
+  await cache.refresh();
+  await assert.doesNotReject(cache.refresh());
+});
