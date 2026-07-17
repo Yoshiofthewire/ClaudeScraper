@@ -28,6 +28,7 @@ from a background-refreshed cache (default every 5 minutes, configurable via
 
 ```jsonc
 {
+  "plan": "Max",
   "bars": [
     { "label": "Current session", "pctUsed": 36, "resetsText": "Resets 12:29pm (America/New_York)" },
     { "label": "Current week (all models)", "pctUsed": 6, "resetsText": "Resets Jul 21, 8:59am (America/New_York)" },
@@ -54,6 +55,7 @@ from a background-refreshed cache (default every 5 minutes, configurable via
 
 | Field | Type | Notes |
 |-------|------|-------|
+| `plan` | string \| null | The account's plan tier as recorded in `/settings` (`"Pro"`, `"Max"`, `"Max x20"`), or `null` if never set. Not scraped — user-recorded metadata. |
 | `bars` | array | One entry per progress bar (session window, weekly all-models, per-model weekly). `resetsText` is the panel's own verbatim relative-time string, `null` if absent. |
 | `session.totalCostUsd` | number \| null | `null` if unparsable |
 | `session.apiDuration` / `session.wallDuration` | string | As shown in the panel, e.g. `"1s"`, `"2m 3s"` |
@@ -127,6 +129,42 @@ Submits the login code pasted back from the browser OAuth step.
 curl -X POST http://localhost:8080/api/login/code \
   -H 'Content-Type: application/json' \
   -d '{"code":"XXXX-XXXX"}'
+```
+
+## GET /api/settings
+
+Returns the currently saved settings.
+
+```jsonc
+{ "plan": "Max", "helloPromptOnReset": false }
+```
+
+```sh
+curl http://localhost:8080/api/settings
+```
+
+## POST /api/settings
+
+Updates one or both settings fields. Partial bodies are merged onto the
+existing saved settings.
+
+**Request body**
+
+```json
+{ "plan": "Max", "helloPromptOnReset": true }
+```
+
+**Status codes**
+
+| Status | Meaning |
+|--------|---------|
+| `200` | Updated settings, same shape as `GET /api/settings` |
+| `400` | `plan` present and not one of `null`, `"Pro"`, `"Max"`, `"Max x20"` |
+
+```sh
+curl -X POST http://localhost:8080/api/settings \
+  -H 'Content-Type: application/json' \
+  -d '{"plan":"Max"}'
 ```
 
 ## `GET /`

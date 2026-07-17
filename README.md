@@ -39,11 +39,14 @@ docker run -d --name claude-usage -p 8080:8080 -v claude-usage-data:/data claude
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/` | GET | Dashboard (authenticated) or login flow (not yet authenticated) |
-| `/api/usage` | GET | Cached `UsageInfo` as JSON (see [Data model](#data-model)) plus `lastUpdatedAt`/`stale`/`error`. Returns `503` before authentication. This is the endpoint other tools/runners should poll. |
+| `/settings` | GET | Settings page (authenticated only; redirects to `/` otherwise) |
+| `/api/usage` | GET | Cached `UsageInfo` as JSON (see [Data model](#data-model)) plus `lastUpdatedAt`/`stale`/`error`/`plan`. Returns `503` before authentication. This is the endpoint other tools/runners should poll. |
 | `/api/refresh` | POST | Force an immediate re-scrape; returns the same shape as `/api/usage` |
 | `/api/login/state` | GET | `{ authenticated, status, loginUrl?, error? }` |
 | `/api/login/start` | POST | Begin the web-driven login flow |
 | `/api/login/code` | POST | `{ "code": "..." }` — submit the pasted-back login code |
+| `/api/settings` | GET | Current settings: `{ plan, helloPromptOnReset }` |
+| `/api/settings` | POST | `{ plan?, helloPromptOnReset? }` — update settings; `400` on an invalid `plan` |
 
 Usage data refreshes in the background every `USAGE_REFRESH_INTERVAL_MS`
 (default 5 minutes); `/api/usage` and the dashboard always serve the cached
@@ -54,6 +57,23 @@ immediate update.
 If a background refresh fails (timeout, unrecognized panel), the cache
 keeps the last good data and marks it `stale: true` with an `error` field,
 rather than discarding known-good data.
+
+## Settings
+
+Visit **`/settings`** (linked from the dashboard header) once authenticated to
+manage:
+
+- **Plan** — which Claude subscription tier the account is on (`Pro`, `Max`,
+  or `Max x20`). Claude Code doesn't expose this itself, so it's recorded
+  here and merged into `/api/usage`'s response as a `plan` field, for
+  consumers that want it as context alongside the usage bars.
+- **Hello prompt on reset** — a toggle to record a preference for sending a
+  "Hello" prompt after every usage-window reset. Currently a stored
+  preference only — the automatic sending isn't wired up yet.
+- **Pair a mobile app** — a placeholder for a future mobile pairing QR code.
+
+Settings persist in `settings.json` in the same `CLAUDE_CONFIG_DIR`-mounted
+volume as credentials, so they survive container restarts.
 
 ## One-shot CLI (still available)
 
@@ -210,11 +230,22 @@ hasCredentials(configDir: string): boolean
 True if `.credentials.json` exists in `configDir`, or
 `CLAUDE_CODE_OAUTH_TOKEN`/`ANTHROPIC_API_KEY` is set.
 
+### `src/settings.js`
+
+```ts
+loadSettings(configDir: string): { plan: 'Pro' | 'Max' | 'Max x20' | null, helloPromptOnReset: boolean }
+saveSettings(configDir: string, patch: { plan?: 'Pro' | 'Max' | 'Max x20' | null, helloPromptOnReset?: boolean }): same shape, throws if `patch.plan` isn't a valid plan value
+```
+Reads/writes `settings.json` in `configDir`, the same directory
+`.credentials.json` lives in. A missing or corrupt file reads back as
+defaults (`{ plan: null, helloPromptOnReset: false }`).
+
 ### `src/htmlView.js`
 
 ```ts
 renderDashboard(state: { data: UsageInfo | null, lastUpdatedAt: Date | null, stale: boolean, error: string | null }): string
 renderLoginPage(loginState: { status: string, loginUrl?: string, error?: string }): string
+renderSettings(settings: { plan: 'Pro' | 'Max' | 'Max x20' | null, helloPromptOnReset: boolean }): string
 ```
 Pure server-rendered HTML, no build step.
 
