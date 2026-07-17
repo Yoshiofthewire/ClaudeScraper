@@ -70,8 +70,8 @@ test('rejects if the response never settles before the timeout', async () => {
   const promise = sendHelloPrompt(session, {
     readyQuietMs: 20,
     readyTimeoutMs: 500,
-    responseQuietMs: 20,
-    responseTimeoutMs: 100,
+    responseQuietMs: 80,
+    responseTimeoutMs: 200,
   });
 
   session.emit('❯ ready\r\n');
