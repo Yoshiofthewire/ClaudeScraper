@@ -417,3 +417,59 @@ test('GET /api/usage includes the plan field from settings', async () => {
     },
   );
 });
+
+test('POST /api/refresh includes the plan field from settings', async () => {
+  const configDir = makeTmpConfigDir();
+  fs.writeFileSync(path.join(configDir, '.credentials.json'), '{}');
+  const sessions = [];
+  await withServer(
+    {
+      configDir,
+      workDir: '/tmp',
+      intervalMs: 60000,
+      scrapeOptions: FAST_SCRAPE_OPTIONS,
+      spawnSession: () => {
+        const s = new ScriptedSession();
+        sessions.push(s);
+        return s;
+      },
+    },
+    async (base) => {
+      await fetch(`${base}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: 'Pro' }),
+      });
+
+      // Let the server's automatic background scrape (session index 0) complete
+      // first, so /api/refresh below is guaranteed to force a fresh scrape
+      // (session index 1) rather than piggyback on the still-in-flight one.
+      await waitUntil(() => sessions.length >= 1);
+      sessions[0].emit('❯ ready\r\n');
+      await waitUntil(() => sessions[0].writes.includes('/usage\r'));
+      sessions[0].emit('Current session\n50% used\nResets 1pm\n');
+
+      let pctUsed;
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const res = await fetch(`${base}/api/usage`);
+        const body = await res.json();
+        pctUsed = body.bars?.[0]?.pctUsed;
+        if (pctUsed === 50) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(pctUsed, 50);
+
+      const refreshPromise = fetch(`${base}/api/refresh`, { method: 'POST' });
+      await waitUntil(() => sessions.length >= 2);
+      sessions[1].emit('❯ ready\r\n');
+      await waitUntil(() => sessions[1].writes.includes('/usage\r'));
+      sessions[1].emit('Current session\n75% used\nResets 2pm\n');
+
+      const res = await refreshPromise;
+      const body = await res.json();
+      assert.equal(body.plan, 'Pro');
+      assert.equal(body.bars?.[0]?.pctUsed, 75);
+    },
+  );
+});

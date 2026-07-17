@@ -46,3 +46,10 @@ test('saveSettings accepts plan: null to clear a previously set plan', () => {
   saveSettings(configDir, { plan: null });
   assert.deepEqual(loadSettings(configDir), { plan: null, helloPromptOnReset: false });
 });
+
+test('saveSettings coerces helloPromptOnReset to a boolean', () => {
+  const configDir = makeTmpConfigDir();
+  const result = saveSettings(configDir, { helloPromptOnReset: 'yes' });
+  assert.equal(result.helloPromptOnReset, true);
+  assert.deepEqual(loadSettings(configDir), { plan: null, helloPromptOnReset: true });
+});

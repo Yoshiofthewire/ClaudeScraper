@@ -27,6 +27,9 @@ export function saveSettings(configDir, patch) {
   }
   const current = loadSettings(configDir);
   const next = { ...current, ...patch };
+  if ('helloPromptOnReset' in patch) {
+    next.helloPromptOnReset = Boolean(patch.helloPromptOnReset);
+  }
   fs.writeFileSync(settingsPath(configDir), JSON.stringify(next));
   return next;
 }
