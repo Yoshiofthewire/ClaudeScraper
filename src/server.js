@@ -226,7 +226,10 @@ export function createServer({
           const updated = saveSettings(configDir, body);
           return sendJson(res, 200, updated);
         } catch (err) {
-          return sendJson(res, 400, { error: err.message });
+          if (err.message.startsWith('invalid plan')) {
+            return sendJson(res, 400, { error: err.message });
+          }
+          throw err;
         }
       }
 
