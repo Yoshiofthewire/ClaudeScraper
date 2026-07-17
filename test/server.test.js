@@ -303,3 +303,117 @@ test('POST /api/login/code without a code returns 400', async () => {
     },
   );
 });
+
+test('GET /settings redirects to / when not authenticated', async () => {
+  const configDir = makeTmpConfigDir();
+  await withServer(
+    { configDir, workDir: '/tmp', intervalMs: 60000, spawnSession: () => new ScriptedSession() },
+    async (base) => {
+      const res = await fetch(`${base}/settings`, { redirect: 'manual' });
+      assert.equal(res.status, 302);
+      assert.equal(res.headers.get('location'), '/');
+    },
+  );
+});
+
+test('GET /settings renders the settings page when authenticated', async () => {
+  const configDir = makeTmpConfigDir();
+  fs.writeFileSync(path.join(configDir, '.credentials.json'), '{}');
+  await withServer(
+    { configDir, workDir: '/tmp', intervalMs: 60000, scrapeOptions: FAST_SCRAPE_OPTIONS, spawnSession: () => new ScriptedSession() },
+    async (base) => {
+      const res = await fetch(`${base}/settings`);
+      assert.equal(res.status, 200);
+      const html = await res.text();
+      assert.match(html, /QR code coming soon/);
+    },
+  );
+});
+
+test('GET /api/settings returns defaults when nothing saved yet', async () => {
+  const configDir = makeTmpConfigDir();
+  await withServer(
+    { configDir, workDir: '/tmp', intervalMs: 60000, spawnSession: () => new ScriptedSession() },
+    async (base) => {
+      const res = await fetch(`${base}/api/settings`);
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { plan: null, helloPromptOnReset: false });
+    },
+  );
+});
+
+test('POST /api/settings persists a plan, GET /api/settings reflects it', async () => {
+  const configDir = makeTmpConfigDir();
+  await withServer(
+    { configDir, workDir: '/tmp', intervalMs: 60000, spawnSession: () => new ScriptedSession() },
+    async (base) => {
+      const postRes = await fetch(`${base}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: 'Max', helloPromptOnReset: true }),
+      });
+      assert.equal(postRes.status, 200);
+      assert.deepEqual(await postRes.json(), { plan: 'Max', helloPromptOnReset: true });
+
+      const getRes = await fetch(`${base}/api/settings`);
+      assert.deepEqual(await getRes.json(), { plan: 'Max', helloPromptOnReset: true });
+    },
+  );
+});
+
+test('POST /api/settings rejects an invalid plan with 400', async () => {
+  const configDir = makeTmpConfigDir();
+  await withServer(
+    { configDir, workDir: '/tmp', intervalMs: 60000, spawnSession: () => new ScriptedSession() },
+    async (base) => {
+      const res = await fetch(`${base}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: 'Ultra' }),
+      });
+      assert.equal(res.status, 400);
+    },
+  );
+});
+
+test('GET /api/usage includes the plan field from settings', async () => {
+  const configDir = makeTmpConfigDir();
+  fs.writeFileSync(path.join(configDir, '.credentials.json'), '{}');
+  const sessions = [];
+  await withServer(
+    {
+      configDir,
+      workDir: '/tmp',
+      intervalMs: 60000,
+      scrapeOptions: FAST_SCRAPE_OPTIONS,
+      spawnSession: () => {
+        const s = new ScriptedSession();
+        sessions.push(s);
+        return s;
+      },
+    },
+    async (base) => {
+      await fetch(`${base}/api/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: 'Pro' }),
+      });
+
+      await waitUntil(() => sessions.length >= 1);
+      sessions[0].emit('❯ ready\r\n');
+      await waitUntil(() => sessions[0].writes.includes('/usage\r'));
+      sessions[0].emit('Current session\n50% used\nResets 1pm\n');
+
+      let plan;
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline) {
+        const res = await fetch(`${base}/api/usage`);
+        const body = await res.json();
+        plan = body.plan;
+        if (body.bars?.[0]?.pctUsed === 50) break;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      assert.equal(plan, 'Pro');
+    },
+  );
+});

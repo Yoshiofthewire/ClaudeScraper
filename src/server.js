@@ -2,10 +2,11 @@ import http from 'node:http';
 import { hasCredentials } from './credentials.js';
 import { createUsageCache } from './usageCache.js';
 import { startLogin, submitLoginCode } from './loginDriver.js';
-import { renderDashboard, renderLoginPage } from './htmlView.js';
+import { renderDashboard, renderLoginPage, renderSettings } from './htmlView.js';
 import { PtySession } from './ptySession.js';
 import { scrapeUsage as scrapeUsagePanel } from './usageDriver.js';
 import { preseed } from './preseed.js';
+import { loadSettings, saveSettings } from './settings.js';
 
 const LOGIN_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -177,14 +178,14 @@ export function createServer({
       if (req.method === 'GET' && req.url === '/api/usage') {
         if (!authenticated) return sendJson(res, 503, { error: 'not authenticated' });
         const state = cache.getState();
-        return sendJson(res, 200, { ...state.data, lastUpdatedAt: state.lastUpdatedAt, stale: state.stale, error: state.error });
+        return sendJson(res, 200, { ...state.data, plan: loadSettings(configDir).plan, lastUpdatedAt: state.lastUpdatedAt, stale: state.stale, error: state.error });
       }
 
       if (req.method === 'POST' && req.url === '/api/refresh') {
         if (!authenticated) return sendJson(res, 503, { error: 'not authenticated' });
         await cache.refresh();
         const state = cache.getState();
-        return sendJson(res, 200, { ...state.data, lastUpdatedAt: state.lastUpdatedAt, stale: state.stale, error: state.error });
+        return sendJson(res, 200, { ...state.data, plan: loadSettings(configDir).plan, lastUpdatedAt: state.lastUpdatedAt, stale: state.stale, error: state.error });
       }
 
       if (req.method === 'GET' && req.url === '/api/login/state') {
@@ -201,6 +202,32 @@ export function createServer({
         if (!body.code) return sendJson(res, 400, { error: 'code is required' });
         const result = await handleLoginCode(body.code);
         return sendJson(res, 200, result);
+      }
+
+      if (req.method === 'GET' && req.url === '/settings') {
+        if (!authenticated) {
+          res.writeHead(302, { Location: '/' });
+          res.end();
+          return;
+        }
+        const html = renderSettings(loadSettings(configDir));
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(html);
+        return;
+      }
+
+      if (req.method === 'GET' && req.url === '/api/settings') {
+        return sendJson(res, 200, loadSettings(configDir));
+      }
+
+      if (req.method === 'POST' && req.url === '/api/settings') {
+        const body = await readJsonBody(req).catch(() => ({}));
+        try {
+          const updated = saveSettings(configDir, body);
+          return sendJson(res, 200, updated);
+        } catch (err) {
+          return sendJson(res, 400, { error: err.message });
+        }
       }
 
       res.writeHead(404, { 'Content-Type': 'text/plain' });
