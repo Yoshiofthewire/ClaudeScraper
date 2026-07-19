@@ -208,13 +208,26 @@ export function createServer({
       }
 
       if (req.method === 'POST' && req.url === '/api/login/start') {
+        if (authenticated) return sendJson(res, 409, { error: 'already authenticated' });
         await handleLoginStart();
         return sendJson(res, 200, loginState());
       }
 
       if (req.method === 'POST' && req.url === '/api/login/code') {
+        if (authenticated) return sendJson(res, 409, { error: 'already authenticated' });
         const body = await readJsonBody(req).catch(() => ({}));
-        if (!body.code) return sendJson(res, 400, { error: 'code is required' });
+        if (typeof body.code !== 'string' || !body.code) {
+          return sendJson(res, 400, { error: 'code is required' });
+        }
+        // Login codes are pasted into the pty wrapped in bracketed-paste
+        // markers (see loginDriver.js submitLoginCode). A code containing
+        // control/escape bytes — e.g. the paste-end sequence ESC[201~ —
+        // could break out of paste mode and have its remainder interpreted
+        // as live keystrokes by the running Claude Code session. Real login
+        // codes never contain these bytes, so reject them outright.
+        if (/[\x00-\x1f\x7f]/.test(body.code)) {
+          return sendJson(res, 400, { error: 'code contains invalid characters' });
+        }
         const result = await handleLoginCode(body.code);
         return sendJson(res, 200, result);
       }
