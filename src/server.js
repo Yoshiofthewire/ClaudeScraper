@@ -15,7 +15,7 @@ export function createServer({
   configDir,
   workDir,
   intervalMs = 300000,
-  spawnSession = () => new PtySession('claude', [], {
+  spawnSession = () => new PtySession('claude', ['--model', 'claude-haiku-4-5'], {
     cwd: workDir,
     env: { ...process.env, CLAUDE_CONFIG_DIR: configDir },
   }),
